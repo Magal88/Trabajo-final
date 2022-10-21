@@ -1,0 +1,972 @@
+---
+title: "TF CEECS"
+author: "Grupo 10"
+date: "16/10/2022"
+output: html_document
+---
+
+
+Integrantes:
+
+Eisik, Magali
+
+Gomez, Sergio
+
+Querci, Marcia
+
+Valenti, Florencia
+
+Resultados del Protocolo ALLIC BFM 2012 para el tratamiento de la Leucemia Linfoblastica Aguda en Niños en Argentina
+
+Objetivo General: Comparar enfermedad residual mínima al día 15 del tratamiento y de acuerdo a los niveles evaluar sobrevida libre de eventos.
+
+```{r}
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(survival)
+library(DT)
+library(kableExtra)
+library(arsenal)
+
+path_datos<-file.choose()
+datos<-read_excel(path_datos)
+
+
+names(datos)
+head(datos) %>%
+  kbl() %>%
+  kable_styling()
+
+ncol(datos)
+nrow(datos)
+summary(datos)
+```
+
+## Analisis exploratorio de datos
+
+
+
+```{r, echo=FALSE}
+#convertimos variables categoricas en factor
+
+datos= datos %>% mutate_at(c
+                           ("Sexo","Down", "MLL","RTA_PRED","Estirpe", "TEL","SNC","Edad_cat","Blancos_cat","Ploidia","CAT_ERM"), factor)
+
+datos$Blancos<- as.numeric(datos$Blancos)
+datos$Blastos<- as.numeric(datos$Blastos)
+datos$MO<- as.numeric(datos$MO)
+datos$Edad<- as.numeric(datos$Edad)
+datos$FCMD_15<- as.numeric(datos$FCMD_15)
+
+#con edad y gb como variables categoricas
+tab1 <- tableby(CAT_ERM~ Sexo + Down + MLL+ RTA_PRED + Estirpe+ Edad_cat + TEL+ Blancos_cat + MO + SNC+MO +Ploidia+Blastos , data=datos)
+tab1
+summary(tab1, text=TRUE)
+
+
+
+
+#con edad y gb como variables continuas
+
+tab2 <- tableby(CAT_ERM~ Sexo + Down + MLL+ RTA_PRED + Estirpe+ Edad + TEL+ Blancos + MO + SNC+MO +Ploidia+Blastos , data=datos)
+tab2
+summary(tab2, text=TRUE)
+
+
+library(tableone)
+variables <- c("Edad", "MO", "Blancos", "Blastos","Sexo","Down","Ploidia","Down","MLL","TEL")
+
+table1 <- CreateTableOne(vars = variables, data=datos)
+
+ print(table1$ContTable,nonnormal=variables) #impresion de variables continuas (mediana e IQR)
+```
+
+## Graficos
+
+```{r}
+library(DT)
+library(networkD3)
+require(dplyr)
+library(highcharter)
+library(js)
+
+
+proportions(table(datos$CAT_ERM))
+plot(datos$CAT_ERM,xlab="Grupos de Enfermedad Residual")
+
+#Distribucion de pacientes por Centro
+table(datos$Centro)
+
+    
+#Edad
+
+ggplot(data = datos, mapping = aes(x=CAT_ERM, y=Edad))+
+  geom_boxplot(mapping = aes(fill=CAT_ERM))+
+  geom_jitter(size=2, position = position_jitter(width = 0.05))+xlab("Grupos de riesgo")+ylab("Edad")
+
+
+ggplot(data = datos, aes(x=Edad))+
+  geom_density(color = 5,    
+               lwd = 1,      
+               linetype = 1)+ xlab("Edad")+ylab("Densidad")
+
+#Blancos
+ggplot(data = datos, mapping = aes(x=CAT_ERM, y=Blancos))+
+  geom_boxplot(mapping = aes(fill=CAT_ERM))+
+  geom_jitter(size=2, position = position_jitter(width = 0.05))+xlab("Grupos de riesgo")+ylab("Globulos Blancos")
+
+ggplot(data = datos, aes(x=Blancos))+
+  geom_density(color = 5,    
+               lwd = 1,      
+               linetype = 1)+ xlab("Blancos")+ylab("Densidad")
+#Blastos
+ggplot(data = datos, mapping = aes(x=CAT_ERM, y=Blastos))+
+  geom_boxplot(mapping = aes(fill=CAT_ERM))+
+  geom_jitter(size=2, position = position_jitter(width = 0.05))+xlab("Grupos de riesgo")+ylab("Blastos en sangre periferica")
+
+ggplot(data = datos, aes(x=Blastos))+
+  geom_density(color = 5,    
+               lwd = 1,      
+               linetype = 1)+ xlab("Blastos en sangre periferica")+ylab("Densidad")
+
+#MO
+
+ggplot(data = datos, mapping = aes(x=CAT_ERM, y=MO))+
+  geom_boxplot(mapping = aes(fill=CAT_ERM))+
+  geom_jitter(size=2, position = position_jitter(width = 0.05))+xlab("Grupos de riesgo")+ylab("Blastos en medula osea")
+
+
+ggplot(data = datos, aes(x=MO))+
+  geom_density(color = 5,    
+               lwd = 1,      
+               linetype = 1)+ xlab("Blastos en Medula Osea")+ylab("Densidad")
+
+#FCMD15: variable aleatoria cuantitativa de ERM
+ggplot(data = datos, aes(x=FCMD_15))+
+  geom_density(color = 5,    
+               lwd = 1,      
+               linetype = 1)+ xlab("Enfermedad Residual Minima")+ylab("Densidad")
+
+
+#Down
+ggplot(datos, aes(Down,  fill=CAT_ERM)) + 
+  geom_bar(position="dodge",colour="black") +
+  xlab("Down")+ ylab("Frecuencia")+
+  ggtitle("Distribución de ERM por  Down") +   
+  theme_bw(base_size = 14) 
+
+datos$evolucion<- factor(datos$Down, levels = c(0,1),labels = c("Vivo","Fallecido"))
+#Sankey plot
+datos$down<-factor(datos$Down, levels = c(1,2),labels = c("NO DOWN","DOWN"))
+data1<- datos%>%dplyr::select(down, evolucion)
+hchart(data_to_sankey(data1), "sankey", name = "Sobrevida segun sindrome de Down")
+
+
+#Sexo
+ggplot(datos, aes(Sexo,  fill=CAT_ERM)) + 
+  geom_bar(position="dodge",colour="black") +
+  xlab("Sexo")+ ylab("Frecuencia")+
+  ggtitle("Distribución de ERM por Sexo") +   
+  theme_bw(base_size = 14) 
+
+#Sankey plot
+datos$sexo<-factor(datos$Sexo, levels = c(1,0),labels = c("Masculino","Femenino"))
+
+data<- datos%>%dplyr::select(sexo, evolucion)
+hchart(data_to_sankey(data), "sankey", name = "Sobrevida segun sexo")
+
+#SNC
+ggplot(datos, aes(SNC,  fill=CAT_ERM)) + 
+  geom_bar(position="dodge",colour="black") +
+  xlab("SNC")+ ylab("Frecuencia")+
+  ggtitle("Distribución de ERM por SNC") +   
+  theme_bw(base_size = 14) 
+
+#Estirpe
+ggplot(datos, aes(Estirpe,  fill=CAT_ERM)) + 
+  geom_bar(position="dodge",colour="black") +
+  xlab("Estirpe")+ ylab("Frecuencia")+
+  ggtitle("Distribución de ERM por Estirpe") +   
+  theme_bw(base_size = 14) 
+
+#Sankey plot
+data2<- datos%>%dplyr::select(Estirpe, evolucion)
+hchart(data_to_sankey(data2), "sankey", name = "Sobrevida segun estirpe de leucemia")
+
+#Respuesta a la prednisona
+ggplot(datos, aes(RTA_PRED,  fill=CAT_ERM)) + 
+  geom_bar(position="dodge",colour="black") +
+  xlab("Rta Prednisona")+ ylab("Frecuencia")+
+  ggtitle("Distribución de ERM por Rta a la Prednisona") +   
+  theme_bw(base_size = 14) 
+
+
+#Sankey plot
+data3<- datos%>%dplyr::select(RTA_PRED, evolucion)
+hchart(data_to_sankey(data3), "sankey", name = "Sobrevida segun respuesta a prednisona")
+
+
+#TEL
+ggplot(datos, aes(TEL,  fill=CAT_ERM)) + 
+  geom_bar(position="dodge",colour="black") +
+  xlab("TEL")+ ylab("Frecuencia")+
+  ggtitle("Distribución de ERM por TEL") +   
+  theme_bw(base_size = 14) 
+
+#Sankey plot
+data4<- datos%>%dplyr::select(TEL, evolucion)
+hchart(data_to_sankey(data4), "sankey", name = "Sobrevida segun TEL")
+
+#MLL
+ggplot(datos, aes(MLL,  fill=CAT_ERM)) + 
+  geom_bar(position="dodge",colour="black") +
+  xlab("MLL")+ ylab("Frecuencia")+
+  ggtitle("Distribución de ERM por MLL") +   
+  theme_bw(base_size = 14) 
+
+#Sankey plot
+data5<- datos%>%dplyr::select(MLL, evolucion)
+hchart(data_to_sankey(data5), "sankey", name = "Sobrevida segun MLL")
+
+#Ploidia
+ggplot(datos, aes(Ploidia,  fill=CAT_ERM)) + 
+  geom_bar(position="dodge",colour="black") +
+  xlab("Ploidia")+ ylab("Frecuencia")+
+  ggtitle("Distribución de ERM por Ploidia") +   
+  theme_bw(base_size = 14) 
+
+
+#Edad como variable categorica
+ggplot(datos, aes(Edad_cat,  fill=CAT_ERM)) + 
+  geom_bar(position="dodge",colour="black") +
+  xlab("Edad")+ ylab("Frecuencia")+
+  ggtitle("Distribución de ERM por edad") +   
+  theme_bw(base_size = 14) 
+
+#Sankey plot
+
+data6<- datos%>%dplyr::select(Edad_cat, evolucion)
+hchart(data_to_sankey(data6), "sankey", name = "Sobrevida segun edad")
+
+
+
+#Recuento de globulos blancos como variable categorica
+
+ggplot(datos, aes(Blancos_cat,  fill=CAT_ERM)) + 
+  geom_bar(position="dodge",colour="black") +
+  xlab("Globulos Blancos")+ ylab("Frecuencia")+
+  ggtitle("Distribución de ERM por globulos blancos") +   
+  theme_bw(base_size = 14) 
+
+
+#Sankey plot
+
+data7<- datos%>%dplyr::select(Blancos_cat, evolucion)
+hchart(data_to_sankey(data7), "sankey", name = "Sobrevida segun globulos blancos")
+
+
+sankeyNetworkOutput("TF-ceecs.html", width = "500px", height = "1000px")
+
+```
+
+Observaciones de los graficos:
+
+Se puede observar que la mayor cantidad de pacientes se encuentran en la categoria 2 (ERM intermedio).
+
+## Analisis de datos faltantes
+
+
+```{r}
+library(visdat)
+vis_miss(datos, sort=TRUE)
+vis_miss(datos, cluster = TRUE)
+vis_dat(datos)
+colSums(is.na(datos))
+
+
+```
+
+
+
+##Analisis de supuestos 
+
+Variables categoricas
+
+
+```{r}
+tabla1<-table(datos$CAT_ERM, datos$Down)
+prop.table(tabla1)
+plot(tabla1, col = c("red", "blue"), main = "Categorias de ERM vs Down")
+chisq.test(tabla1)
+#No se cumplen supuestos, se debe realizar el test de Fisher
+fisher.test(tabla1)
+
+
+tabla2<-table(datos$Ploidia, datos$CAT_ERM)
+plot(tabla2, col=c("red", "blue", "yellow"), main = "Categorias de ERM vs Ploidia")
+chisq.test(tabla2)
+
+tabla3<-table(datos$RTA_PRED, datos$CAT_ERM)
+plot(tabla3, col=c("red", "blue", "yellow"), main = "Categorias de ERM vs Rta predinisona")
+chisq.test(tabla3)
+
+tabla4 <- table(datos$Sexo,datos$CAT_ERM)
+plot(tabla4, col=c("red", "blue", "yellow"), main = "Categorias de ERM vs Sexo")
+chisq.test(tabla4)
+
+tabla5 <- table(datos$SNC,datos$CAT_ERM)
+plot(tabla5, col=c("red", "blue", "yellow"), main = "Categorias de ERM vs SNC")
+
+#no se cumplen supuestos, se realiza el test de Fisher
+
+#marca error, ver (no arroja resultado fisher)
+
+tabla6 <- table(datos$MLL,datos$CAT_ERM)
+plot(tabla6, col=c("red", "blue", "yellow"), main = "Categorias de ERM vs MLL")
+chisq.test(tabla6)
+#no se cumplen supuestos, se realiza el test de Fisher
+fisher.test(tabla6)
+
+
+
+tabla7 <- table(datos$TEL,datos$CAT_ERM)
+plot(tabla6, col=c("red", "blue", "yellow"), main = "Categorias de ERM vs TEL")
+chisq.test(tabla7)
+
+
+
+tabla8 <- table(datos$Estirpe,datos$CAT_ERM)
+plot(tabla8, col=c("red", "blue", "yellow"), main = "Categorias de ERM vs Estirpe")
+chisq.test(tabla8)
+
+
+
+tabla9 <- table(datos$Edad_cat,datos$CAT_ERM)
+plot(tabla9, col=c("red", "blue", "yellow"), main = "Categorias de ERM vs Edad")
+chisq.test(tabla9)
+
+
+
+
+tabla10 <- table(datos$Blancos_cat,datos$CAT_ERM)
+plot(tabla10, col=c("red", "blue", "yellow"), main = "Categorias de ERM vs Globulos Blancos")
+chisq.test(tabla10)
+
+```
+
+
+
+
+```{r}
+
+
+#Normalidad: variables continuas (Edad, Blastos, MO, Blancos)
+#Edad
+hist(datos$Edad)
+shapiro.test(datos$Edad)
+
+#analisis de residuos
+modedad=lm(Edad~CAT_ERM, data = datos)
+#Creo una tabla para evaluar los residuos, los residuos standarizados y los predichos
+residuos <- resid(modedad)
+r_estandarizados <- rstandard(modedad)
+predichos <- fitted(modedad)
+data_residuos <- as.data.frame(residuos, r_estandarizados, predichos)
+
+#Shapiro de los residuos
+shapiro.test(residuos)
+qqnorm(residuos)
+qqline(residuos)
+#no da normal
+
+#Evalúo la normalidad de los residuos graficamente
+ggplot(data_residuos)+
+  geom_histogram(
+    mapping = aes(x=residuos)
+  )
+qqnorm(residuos)
+qqline(residuos)
+ggplot(data_residuos)+
+  geom_point(
+    mapping = aes(x=predichos, y=r_estandarizados))
+
+#Blastos
+hist(datos$Blastos)
+shapiro.test(datos$Blastos)
+
+#analisis de residuos
+modblast=lm(Blastos~CAT_ERM, data = datos)
+#Creo una tabla para evaluar los residuos, los residuos standarizados y los predichos
+residuos1 <- resid(modblast)
+r_estandarizados1 <- rstandard(modblast)
+predichos1 <- fitted(modblast)
+data_residuos1 <- as.data.frame(residuos, r_estandarizados1, predichos1)
+
+#Shapiro de los residuos
+shapiro.test(residuos1)
+
+#no da normal
+
+
+qqnorm(residuos1)
+qqline(residuos1)
+
+#Blancos
+hist(datos$Blancos)
+shapiro.test(datos$Blancos)
+
+#analisis de residuos
+modblanc=lm(Blancos~CAT_ERM, data = datos)
+#Creo una tabla para evaluar los residuos, los residuos standarizados y los predichos
+residuos2 <- resid(modblanc)
+r_estandarizados2 <- rstandard(modblanc)
+predichos2<- fitted(modblanc)
+data_residuos2 <- as.data.frame(residuos2, r_estandarizados2, predichos2)
+
+#Shapiro de los residuos
+shapiro.test(residuos2)
+qqnorm(residuos2)
+qqline(residuos2)
+
+#no da normal
+
+#Evalúo la normalidad de los residuos graficamente
+ggplot(data_residuos2)+
+  geom_histogram(
+    mapping = aes(x=residuos2)
+  )
+qqnorm(residuos2)
+qqline(residuos2)
+ggplot(data_residuos2)+
+  geom_point(
+    mapping = aes(x=predichos2, y=r_estandarizados2))
+
+#MO 
+hist(datos$MO)
+shapiro.test(datos$MO)
+
+#analisis de residuos
+modMO=lm(MO~CAT_ERM, data = datos)
+#Creo una tabla para evaluar los residuos, los residuos standarizados y los predichos
+residuos3 <- resid(modMO)
+r_estandarizados3 <- rstandard(modMO)
+predichos3<- fitted(modMO)
+data_residuos3 <- as.data.frame(residuos3, r_estandarizados3, predichos3)
+
+#Shapiro de los residuos
+shapiro.test(residuos3)
+
+#no da normal
+qqnorm(residuos3)
+qqline(residuos3)
+
+#Evalúo la normalidad de los residuos graficamente
+ggplot(data_residuos3)+
+  geom_histogram(
+    mapping = aes(x=residuos3)
+  )
+qqnorm(residuos3)
+qqline(residuos3)
+ggplot(data_residuos3)+
+  geom_point(
+    mapping = aes(x=predichos3, y=r_estandarizados3))
+
+#Evaluacion de homocedasticidad
+library(car)
+#EDAD
+leveneTest(Edad ~ CAT_ERM, data = datos)
+#pv< 0.05, hay evidencias de incumplimiento del supuesto de homogeneidad de varianzas
+
+#Blastos
+leveneTest(Blastos ~ CAT_ERM, data = datos)
+#pv>0.05 no hay evidencias de incumplimiento del supuesto de homogeneidad de varianzas
+
+#Blancos
+leveneTest(Blancos ~ CAT_ERM, data = datos)
+#pv>0.05 no hay evidencias de incumplimiento del supuesto de homogeneidad de varianzas
+
+#MO
+leveneTest(MO ~ CAT_ERM, data = datos)
+#pv>0.05 no hay evidencias de incumplimiento del supuesto de homogeneidad de varianzas
+```
+
+
+
+Analisis de variables continuas (VER)
+
+-Edad: test de la mediana (no cumple normalidad ni homocedasticidad)
+-MO, Blancos y Blastos: Wilcoxon/Mann Whitney (no cumple normalidad y si cumple homocedasticidad)
+
+```{r}
+#Edad
+library(coin)
+library(agricolae)
+
+
+```
+
+
+
+Imputacion de datos faltantes
+```{r}
+require(dplyr)
+library(car)
+library(lattice)
+library(mice)
+library(rlist)
+library(naniar)
+library(glmmTMB)
+library(VIM)
+require(ggplot2)
+library(visdat)
+library(naniar)
+library(rpart)
+library(rpart.plot)
+require(arsenal)
+
+n_miss(datos)
+n_complete(datos)
+prop_miss(datos)
+pct_miss(datos)
+prop_complete(datos)
+pct_complete(datos)
+#Categorias de enfermedad residual, VA categorica
+prop_miss(datos$CAT_ERM)
+pct_complete(datos$CAT_ERM)
+#Enfermedad residual, VA cuantitativa
+prop_miss(datos$FCMD_15)
+pct_complete(datos$FCMD_15)
+#TEL, VA categorica
+prop_miss(datos$TEL)
+pct_complete(datos$TEL)
+#MLL, VA categorica
+prop_miss(datos$MLL)
+pct_complete(datos$MLL)
+#Rta a prednisona, VA categorica
+prop_miss(datos$RTA_PRED)
+pct_complete(datos$RTA_PRED)
+#Blastos, VA cuantitativa
+prop_miss(datos$Blastos)
+pct_complete(datos$Blastos)
+
+
+datos %>% miss_var_summary()
+datos %>% miss_case_summary()
+
+vis_miss(datos)
+vis_miss(datos, sort_miss = T, cluster = T)
+
+gg_miss_var(datos)
+gg_miss_var(datos, facet = CAT_ERM)
+
+gg_miss_case(datos)
+gg_miss_case(datos, facet = CAT_ERM)
+
+#con fcmd15
+gg_miss_var(datos, facet = FCMD_15)
+gg_miss_case(datos, facet = FCMD_15)
+
+#con tel
+
+gg_miss_var(datos, facet = TEL)
+gg_miss_case(datos, facet = TEL)
+
+#con MLL
+gg_miss_var(datos, facet = MLL)
+gg_miss_case(datos, facet = MLL)
+
+#con rta a prednisona
+gg_miss_var(datos, facet = RTA_PRED)
+gg_miss_case(datos, facet = RTA_PRED)
+
+gg_miss_upset(datos)
+gg_miss_upset(datos, nset=20, nintersects=NA)
+
+md.pattern(datos, rotate.names = T)
+
+aggr(datos, col=c('navyblue','red'),numbers=TRUE, sortVars=TRUE, labels=names(datos), cex.axis=.7, gap=3, ylab=c("Histograma de missing data","Patron"))
+aggr(datos, col=c('navyblue','red'),varheight=T, numbers=TRUE, sortVars=TRUE, labels=names(datos), cex.axis=.7, gap=3, ylab=c("Histograma de missing data","Patron"))
+
+as_shadow(datos)
+glimpse(nabular(datos))
+
+
+datos_prueba <- na.omit(datos)
+n_inicial <- nrow(datos)
+n_final <- nrow(datos_prueba)
+(n_inicial- n_final)/n_inicial
+
+
+datos_imputados <- mice(datos, m = 10,  defaultMethod = c("pmm","logreg", "polyreg", "polr"), maxit = 5,printFlag = F)
+
+
+complete(datos_imputados)
+complete(datos_imputados, 2)
+densityplot(datos_imputados)
+
+
+modelo1 <- glm.mids(CAT_ERM ~ Sexo + Down + MLL+ RTA_PRED + Estirpe+ Edad + TEL+ Blancos + MO + SNC+RTA_PRED +Ploidia + Blastos,data =  datos_imputados,family = binomial)
+summary(pool(modelo1))
+
+#hacer con edad y gb  como variables categoricas
+
+modelo1 <- glm.mids(CAT_ERM~ Sexo + Down + MLL+ RTA_PRED + Estirpe + TEL + MO + SNC + RTA_PRED +Ploidia,data =  datos_imputados,family = binomial)
+summary(pool(modelo1))
+
+fit <- with(datos_imputados, glm(CAT_ERM~ Sexo + Down + MLL+ RTA_PRED + Estirpe + TEL + MO + SNC + RTA_PRED +Ploidia,family = binomial))
+print(pool(fit))
+pool(fit)
+
+
+```
+
+
+Random forest para seleccion de variables
+
+```{r}
+require(ggplot2)
+require(dplyr)
+library(randomForest)
+
+rf<-randomForest(CAT_ERM~ Sexo + Down + RTA_PRED + Estirpe+ Edad + TEL+ Blancos  + SNC + RTA_PRED +Ploidia + Blastos,data=datos, importance = TRUE,  na.action = na.roughfix)
+str(rf)
+rf$importance
+
+v<-as.vector(rf$importance[,1])
+w<-(as.vector((colnames(datos))))
+DF<-cbind(w,v)
+DF<-as.data.frame(DF)
+str(DF)
+DF<-DF %>% mutate(v=as.numeric(v),
+              w=as.factor(w))
+
+ggplot(DF, aes(x=reorder(w,v), y=v,fill=w))+ 
+  geom_bar(stat="identity", position="dodge")+ coord_flip()+
+  ylab("Importancia de variables")+
+  xlab("")+
+  theme(legend.position = "none")
+
+
+```
+
+
+
+
+
+
+
+
+Regresion de COX con base de datos sin imputacion
+
+```{r}
+library(survival)
+library(ggplot2)
+library(KMsurv)
+library(ggfortify)
+library ( survminer)
+library(survMisc)
+library(base)
+library(flexsurv)
+library(coin)
+library(data.table)
+library(Hmisc)
+
+
+#Graficos
+
+ckm<-survfit(Surv(TIEMPOSG, SGSTATUS) ~ CAT_ERM,data=datos, conf.type="log-log")
+
+#CATEGORIAS DE ENFERMEDAD RESIDUAL
+ggsurvplot(fit = ckm, data =datos, conf.int = T, title = "LLA",
+          xlab = "Tiempo", ylab = "Probabilidad de sobrevida", legend.title = "CAT_ERM",
+                legend.labs = c("Estandar", "Intermedio", "Elevado"), risk.table = "percentage",  ncensor.plot = F, surv.median.line = "hv")
+
+#SEXO
+ckm_sexo<-survfit(Surv(TIEMPOSG, SGSTATUS) ~ Sexo,data=datos, conf.type="log-log")
+ggsurvplot(fit = ckm_sexo, data =datos, conf.int = T, title = "LLA",
+          xlab = "Tiempo", ylab = "Probabilidad de sobrevida", legend.title = "Sexo",
+                legend.labs = c("Femenino","Masculino"), risk.table = "percentage",  ncensor.plot = F, surv.median.line = "hv")
+
+
+#Down
+ckm_down<-survfit(Surv(TIEMPOSG, SGSTATUS) ~ Down,data=datos, conf.type="log-log")
+ggsurvplot(fit = ckm_down, data =datos, conf.int = T, title = "LLA",
+          xlab = "Tiempo", ylab = "Probabilidad de sobrevida", legend.title = "Down",
+                legend.labs = c("No","Si"), risk.table = "percentage",  ncensor.plot = F, surv.median.line = "hv")
+
+#SNC
+ckm_snc<-survfit(Surv(TIEMPOSG, SGSTATUS) ~ SNC,data=datos, conf.type="log-log")
+ggsurvplot(fit = ckm_snc, data =datos, conf.int = T, title = "LLA",
+          xlab = "Tiempo", ylab = "Probabilidad de sobrevida", legend.title = "SNC",
+                legend.labs = c("1","2","3"), risk.table = "percentage",  ncensor.plot = F, surv.median.line = "hv")
+
+#Ploidia
+ckm_ploidia<-survfit(Surv(TIEMPOSG, SGSTATUS) ~ Ploidia,data=datos, conf.type="log-log")
+ggsurvplot(fit = ckm_ploidia, data =datos, conf.int = T, title = "LLA",
+          xlab = "Tiempo", ylab = "Probabilidad de sobrevida", legend.title = "Ploidia",
+                legend.labs = c("1","2","4","5"), risk.table = "percentage",  ncensor.plot = F, surv.median.line = "hv")
+
+#Estirpe
+ckm_estirpe<-survfit(Surv(TIEMPOSG, SGSTATUS) ~ Estirpe,data=datos, conf.type="log-log")
+ggsurvplot(fit = ckm_estirpe, data =datos, conf.int = T, title = "LLA",
+          xlab = "Tiempo", ylab = "Probabilidad de sobrevida", legend.title = "Estirpe",
+                legend.labs = c("B","T"), risk.table = "percentage",  ncensor.plot = F, surv.median.line = "hv")
+
+#RTA_pred
+ckm_pred<-survfit(Surv(TIEMPOSG, SGSTATUS) ~ RTA_PRED,data=datos, conf.type="log-log")
+ggsurvplot(fit = ckm_pred, data =datos, conf.int = T, title = "LLA",
+          xlab = "Tiempo", ylab = "Probabilidad de sobrevida", legend.title = "Rta Prednisona",
+                legend.labs = c("No","Si"), risk.table = "percentage",  ncensor.plot = F, surv.median.line = "hv")
+
+#MLL
+
+ckm_mll<-survfit(Surv(TIEMPOSG, SGSTATUS) ~ MLL,data=datos, conf.type="log-log")
+ggsurvplot(fit = ckm_mll, data =datos, conf.int = T, title = "LLA",
+          xlab = "Tiempo", ylab = "Probabilidad de sobrevida", legend.title = "MLL",
+                legend.labs = c("Ausente","Presente"), risk.table = "percentage",  ncensor.plot = F, surv.median.line = "hv")
+
+#TEL
+ckm_tel<-survfit(Surv(TIEMPOSG, SGSTATUS) ~ TEL,data=datos, conf.type="log-log")
+ggsurvplot(fit = ckm_tel, data =datos, conf.int = T, title = "LLA",
+          xlab = "Tiempo", ylab = "Probabilidad de sobrevida", legend.title = "TEL",
+                legend.labs = c("Ausente","Presente"), risk.table = "percentage",  ncensor.plot = F, surv.median.line = "hv")
+
+#Edad cat
+ckm_edad<-survfit(Surv(TIEMPOSG, SGSTATUS) ~ Edad_cat,data=datos, conf.type="log-log")
+ggsurvplot(fit = ckm_edad, data =datos, conf.int = T, title = "LLA",
+          xlab = "Tiempo", ylab = "Probabilidad de sobrevida", legend.title = "Edad",
+                legend.labs = c("Mayor a 6","Menor a 6"), risk.table = "percentage",  ncensor.plot = F, surv.median.line = "hv")
+
+#Blancos cat
+
+ckm_blancos<-survfit(Surv(TIEMPOSG, SGSTATUS) ~ Blancos_cat,data=datos, conf.type="log-log")
+ggsurvplot(fit = ckm_blancos, data =datos, conf.int = T, title = "LLA",
+          xlab = "Tiempo", ylab = "Probabilidad de sobrevida", legend.title = "GB",
+                legend.labs = c("Menor a 20.000","Mayor a 20.000"), risk.table = "percentage",  ncensor.plot = F, surv.median.line = "hv")
+
+
+survdiff(Surv(TIEMPOSG,SGSTATUS)~CAT_ERM,data=datos)
+
+
+
+logrank_test(Surv(TIEMPOSG,SGSTATUS)~CAT_ERM,data=datos)
+
+#Riesgos relativos (hazards ratios) de cada uno de las categorias 2 y 3 respecto a la categoria 1 (estandar)
+summary(coxph( Surv(TIEMPOSG,SGSTATUS) ~ I(CAT_ERM=="2")+I(CAT_ERM=="3"), data=datos))
+
+
+kmaids<-survfit(Surv(TIEMPOSG, SGSTATUS)~CAT_ERM,data=datos, type="kaplan-meier",conf.type = "log-log", conf.int = 0.95)
+ 
+print(kmaids, print.rmean=T)
+
+summary(coxph( Surv(TIEMPOSG,SGSTATUS) ~ I(CAT_ERM=="2")+I(CAT_ERM=="3"), data=datos))
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~SNC, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~SNC, data=datos)
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~Blancos, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~Blancos, data=datos)
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~MO, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~MO, data=datos)
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~Blastos, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~Blastos, data=datos)
+
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~TEL, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~TEL, data=datos)
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~MLL, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~MLL, data=datos)
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~Estirpe, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~Estirpe, data=datos)
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~Ploidia, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~Ploidia, data=datos)
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~RTA_PRED, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~RTA_PRED, data=datos)
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~Sexo, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~Sexo, data=datos)
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~Edad_cat, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~Edad_cat, data=datos)
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~Blancos_cat, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~Blancos_cat, data=datos)
+
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~Edad, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~Edad, data=datos)
+
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~Blancos, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~Blancos, data=datos)
+
+coxph( Surv(TIEMPOSG, SGSTATUS)~Sexo + Down + MLL+ RTA_PRED + Estirpe+ Edad + TEL+ Blancos + MO + SNC+RTA_PRED +Ploidia + Blastos, data=datos)
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~Sexo + Down + MLL+ RTA_PRED + Estirpe+ Edad + TEL+ Blancos + MO + SNC+RTA_PRED +Ploidia + Blastos, data=datos))
+
+
+#Modelo multivariado sin MLL ni MO (dan pv >0.2)
+
+summary(coxph( Surv(TIEMPOSG, SGSTATUS)~Sexo + Down + RTA_PRED + Estirpe+ Edad + TEL+ Blancos  + SNC+RTA_PRED +Ploidia + Blastos, data=datos))
+coxph( Surv(TIEMPOSG, SGSTATUS)~Sexo + Down + RTA_PRED + Estirpe+ Edad + TEL+ Blancos  + SNC+RTA_PRED +Ploidia + Blastos, data=datos)
+
+#con edad y gb como variables categoricas
+modelo_mult<- coxph( Surv(TIEMPOSG, SGSTATUS)~Sexo + Down + RTA_PRED + Estirpe+ Edad_cat + TEL+ Blancos_cat  + SNC+RTA_PRED +Ploidia + Blastos, data=datos)
+
+
+#VIF del modelo
+
+summary(modelo_mult)
+library(car)
+vif_modelo<- vif(modelo_mult)
+print(vif_modelo)
+
+```
+
+
+## Analisis de riesgo proporcional y residuos
+
+```{r}
+coxlla<-coxph(Surv(TIEMPOSG,SGSTATUS) ~ CAT_ERM, data=datos)
+cox.zph(coxlla)
+
+#modelo multivariado sin MO ni MLL
+coxlla1<-coxph( Surv(TIEMPOSG,SGSTATUS) ~ Sexo + Down + RTA_PRED + Estirpe+ Edad_cat + TEL+ Blancos_cat  + SNC+RTA_PRED +Ploidia + Blastos, data=datos)
+cox.zph(coxlla1)
+# Se cumple supuesto de riesgo proporcional, en todos los casos, los pv obtenidos son mayores a 0.05
+#El modelo supone que el HR para cada variable Xj es el mismo cualquiera sea el tiempo t
+
+
+
+#Verificacion del supuesto de riesgo proporcional graficamente:
+require(rms) 
+require(car)
+survlla1<- npsurv(Surv(TIEMPOSG,SGSTATUS)~CAT_ERM,data=datos)
+survplot(survlla1, loglog=T, logt=F, xlim = c(0,12),
+ xlab="Tiempo hasta la muerte", ylab = "Log(-Log (S(t))", label.curves = T, time.inc = 1,
+levels.only = T, conf="none", type="kaplan-meier") 
+
+residuos_lla<-cox.zph(coxlla)
+residuos_lla
+#Residuos
+ggcoxzph(residuos_lla,font.main=10)
+par(mfrow=c(2,2))
+#Se muestran  los residuos escalados de Schoenfeld vs. tiempo para cada variable del modelo. Estos residuos tambien permiten testear la hipotesis de riesgo proporcional.
+
+
+#Residuos martingala
+ggcoxdiagnostics(coxlla1, type = "martingale",
+                 linear.predictions = FALSE, ggtheme = theme_bw())
+
+#Los residuos se  distribuyen de forma aproximadamente simetrica alrededor de cero.
+
+#Residuos dfbeta
+ggcoxdiagnostics(coxlla1, type = "dfbeta",
+                 linear.predictions = FALSE, ggtheme = theme_bw())
+
+
+```
+
+
+
+
+En el analisis del VIF, se observa que los valores son menores a 5, con lo cual no existe problema de colinealidad entre las variables explicativas.
+
+
+##Riesgo competitivo
+
+```{r}
+library(readxl)
+ERM <- read_excel("C:/Users/Magali/Desktop/TF CEECS/Base final.xlsx", 
+    sheet = "riesgo comp")
+head(ERM)
+table(ERM$dis,ERM$status)
+ERM$dis<-factor(ERM$dis,levels = c(1,2,3),labels = c("<0.1 ","0.1-10",">10"))
+
+#La funcion de incidencia acumulada CIF puede estimar diferentes causas de falla y permite comparaciones entre grupos
+
+
+library(cmprsk)
+CIFdata_lla <- cuminc(ftime = ERM$ftime, fstatus= ERM$status, cencode = 0)
+cifdata_lladis <- cuminc(ftime = ERM$ftime, fstatus= ERM$status, group = ERM$dis)
+plot(cifdata_lladis,xlab="Tiempo (meses")
+
+#Prueba de Chi Cuadrado
+cifdata_lladis$Tests
+
+
+#Grafico de  incidencias acumulada por categoria de ERM 
+require(ggplot2)
+ggcompetingrisks(cifdata_lladis, palette = "lancet",legend = "top", ggtheme = theme_bw())
+
+
+
+
+```
+
+
+CURVA ROC
+
+
+```{r}
+library(pROC)
+
+roc<-roc(datos$SGSTATUS,datos$FCMD_15)
+roc1<-roc(datos$SGSTATUS,datos$FCMD_15,smooth=TRUE)
+plot(roc)
+plot(roc1)
+auc(roc)
+coords(roc,transpose = TRUE)
+coords(roc1,transpose = FALSE)
+
+
+
+rocobj <- plot.roc(datos$SGSTATUS,datos$FCMD_15,main="Confidence intervals", percent=TRUE,ci=TRUE,print.auc=TRUE) 
+
+
+ciobj <- ci.se(rocobj, specificities=seq(0,50,100))
+
+
+
+umbral<-plot.roc(datos$SGSTATUS,datos$FCMD_15, main="Confidence interval of a threshold", percent=TRUE,ci=TRUE, of="thresholds",thresholds="best",print.thres="best")
+umbral<-plot.roc(datos$SGSTATUS,datos$FCMD_15, main="Confidence interval of a threshold", percent=TRUE,ci=TRUE,print.auc=TRUE, of="thresholds",thresholds="best",print.thres="best")
+plot(ciobj, type="shape", col="#1c61b6AA") 
+
+
+#Potencia 
+print(power.roc.test(roc))
+print(power.roc.test(ncases=119, ncontrols=57, auc=0.85, sig.level=0.01))
+
+
+
+```
+
+
+## Regresion logistica ordinal
+
+```{r}
+library(MASS)
+#Modelo de regresion ordinal, edad y globulos blancos como variables  continuas
+modelo_ord<- polr(CAT_ERM~Sexo + Down + MLL+ RTA_PRED + Estirpe+ Edad + TEL+ Blancos + MO + SNC+RTA_PRED +Ploidia + Blastos+MO+MLL,data=datos,Hess = TRUE)
+summary(modelo_ord)
+confint(modelo_ord)
+
+#Al ser la muestra grande, se puede comparar el t valor con una normal:
+ctable1 <- coef(summary(modelo_ord))
+# ver no nos dieron los pvalores
+
+
+#Modelo de regresion ordinal, edad y globulos blancos como variables categoricas
+modelo_ord1<- polr(CAT_ERM~Sexo + Down + MLL+ RTA_PRED + Estirpe+ Edad_cat + TEL+ Blancos_cat + MO + SNC+RTA_PRED +Ploidia + Blastos+MO+MLL,data=datos,Hess = TRUE)
+summary(modelo_ord1)
+confint(modelo_ord1)
+
+```
+
